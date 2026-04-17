@@ -463,13 +463,7 @@
         }
     })();
 
-    // Utilisateurs autorisés
-    const USERS = {
-        admin: { password: 'admin123', role: 'admin' },
-        visiteur: { password: 'visit123', role: 'visiteur' }
-    };
-
-    function doLogin() {
+    async function doLogin() {
         const username = document.getElementById('username').value.trim();
         const password = document.getElementById('password').value;
         const role = document.getElementById('role').value;
@@ -482,27 +476,51 @@
             return;
         }
 
-        const user = USERS[username];
-        if (!user || user.password !== password || user.role !== role) {
-            showError('Identifiants incorrects ou rôle invalide.');
-            return;
-        }
-
-        // Succès
-        errorEl.classList.remove('visible');
         btn.classList.add('loading');
-        btn.textContent = '';
-        btn.insertAdjacentText('beforeend', 'Connexion en cours…');
+        btn.textContent = 'Connexion en cours…';
+        errorEl.classList.remove('visible');
 
-        // Sauvegarder la session durable
-        localStorage.setItem('rg_user', username);
-        localStorage.setItem('rg_role', role);
-        localStorage.setItem('rg_logged', '1');
+        try {
+            const response = await fetch('http://localhost:3001/api/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, password })
+            });
 
-        // Rediriger vers la page principale
-        setTimeout(() => {
-            window.location.href = 'index.php';
-        }, 900);
+            const result = await response.json();
+
+            if (!response.ok || !result.success) {
+                btn.classList.remove('loading');
+                btn.textContent = 'Se connecter';
+                showError(result.error || 'Identifiants incorrects.');
+                return;
+            }
+
+            // Vérification stricte du rôle choisi vs le rôle de la DB
+            if (result.user.role !== role) {
+                btn.classList.remove('loading');
+                btn.textContent = 'Se connecter';
+                showError('Vous n\'avez pas le rôle ' + role + '.');
+                return;
+            }
+
+            // Succès
+            localStorage.setItem('rg_user', result.user.username);
+            localStorage.setItem('rg_role', result.user.role);
+            localStorage.setItem('rg_logged', '1');
+            localStorage.setItem('rg_user_id', result.user.id);
+
+            // Rediriger vers la page principale
+            setTimeout(() => {
+                window.location.href = 'index.php';
+            }, 500);
+
+        } catch (error) {
+            console.error("Login Server Error:", error);
+            btn.classList.remove('loading');
+            btn.textContent = 'Se connecter';
+            showError('Serveur injoignable (Node.js). Vérifiez votre connexion.');
+        }
     }
 
     function showError(msg) {

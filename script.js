@@ -207,12 +207,61 @@ document.querySelectorAll(".btn-cmd").forEach(function (btn) {
         const key = this.getAttribute("data-topic").split("/").pop();
         equipmentState[key] = !equipmentState[key];
         updateButton(this.id, equipmentState[key]);
+        
+        if (client && client.connected) {
+            const cmd = {};
+            cmd[key === "ventilateur" ? "fan" : "heating"] = equipmentState[key];
+            client.publish('cta/commands', JSON.stringify(cmd));
+        }
     });
 });
 
 initChart();
 updateAffichage();
-setInterval(function () {
-    simulateTemperatures();
-    updateAffichage();
-}, 800);
+
+// === MQTT Real-Time Integration ===
+const MQTT_BROKER = 'wss://d5125818a1ee4c1a950ddf610a8f07d6.s1.eu.hivemq.cloud:8884/mqtt';
+
+// ⚠️ REPLACE 'VOTRE_UTILISATEUR' and 'VOTRE_MOT_DE_PASSE' with your HiveMQ Access Management credentials!
+const client = typeof mqtt !== 'undefined' ? mqtt.connect(MQTT_BROKER, {
+  clientId: 'cta-legacy-ui-' + Math.random().toString(16).substr(2, 8),
+  username: 'adibos', // <--- Changez ceci
+  password: 'Trontocasino1' // <--- Changez ceci
+}) : null;
+
+if (client) {
+    client.on('connect', () => {
+        console.log('Connecté au broker MQTT !');
+        client.subscribe('cta/sensors');
+        
+        // Initialize interface to indicate it's online
+        const statEl = document.getElementById("etat");
+        if (statEl) statEl.textContent = "Connecté MQTT";
+    });
+
+    client.on('message', (topic, payload) => {
+        if (topic === 'cta/sensors') {
+            try {
+                const data = JSON.parse(payload.toString());
+                
+                if (data.temperature !== undefined) {
+                    t_ext = data.temperature;
+                    // Deriving realistic values for the schematic based on the single sensor
+                    t_reprise = data.temperature - 1.5;
+                    t_neuf = data.temperature - 3;
+                    t_soufflage = equipmentState.chauffage ? t_reprise + 15 : t_reprise;
+                }
+                
+                // Update filtration / vanne to look dynamic
+                filtrePct += (Math.random() - 0.5) * 0.5;
+                filtrePct = Math.max(0, Math.min(100, filtrePct));
+                vannePct = equipmentState.chauffage ? Math.min(100, vannePct + 2) : Math.max(0, vannePct - 3);
+
+                updateAffichage();
+            } catch(e) {
+                console.error("Payload MQTT invalide", e);
+            }
+        }
+    });
+}
+

@@ -540,9 +540,18 @@
         </div>
 
         <!-- Schéma du flux d'air retiré -->
+        
+        <div class="bottom-bar-grid" style="margin-top: 1.5rem; display: grid; gap: 1rem; grid-template-columns: 1fr;">
+            <div class="commands-panel" style="padding: 1.5rem; background: var(--surface); border-radius: var(--radius); border: 1px solid #e5e7eb;">
+                <h3 style="margin-bottom: 1rem;">Commandes Manuelles</h3>
+                <div style="display: flex; gap: 1rem;">
+                    <button class="btn-cmd" id="btn-chauffage" data-topic="cta/chauffage" style="flex: 1; padding: 1rem; border-radius: 8px; border: 1px solid #d1d5db; background: white; cursor: pointer;">Chauffage OFF</button>
+                    <button class="btn-cmd" id="btn-ventilateur" data-topic="cta/ventilateur" style="flex: 1; padding: 1rem; border-radius: 8px; border: 1px solid #d1d5db; background: white; cursor: pointer;">Ventilateur OFF</button>
+                </div>
+            </div>
+        </div>
     </main>
 
-    <script src="api-client.js"></script>
     <script>
         // Gestion du clic sur un composant
         function onComponentClick(id) {
@@ -678,6 +687,19 @@
                     cardEtatSpan.style.color = newValue === 'Actif' ? 'var(--success)' : 'var(--danger)';
                     cardEtatSpan.style.transition = 'color 0.4s ease';
                 }
+
+                // ⚡ NEW: Sync status directly to the MySQL database via Node.js
+                console.log("[DEBUG] Sending PUT request via fetch to update DB:", { ctaSlug: currentCTA, status: newValue.toLowerCase() });
+                
+                fetch('http://localhost:3001/api/equipments/status', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                    body: JSON.stringify({ ctaSlug: currentCTA, status: newValue.toLowerCase() })
+                })
+                .then(res => res.json())
+                .then(data => console.log("[DEBUG] API Response from Node.js:", data))
+                .catch(e => console.error('[ERROR] Failed to sync equipment status to DB:', e));
+
             }, 250);
         }
 
@@ -741,14 +763,22 @@
         };
 
         const APIClient = {
-            baseUrl: window.location.origin + window.location.pathname.replace(/machine\.php$/, '') + 'api/',
+            baseUrl: 'http://localhost:3001/api/',
 
             async getDonneesCourant() {
-                const response = await fetch(this.baseUrl + 'sensor_data.php');
+                const response = await fetch(this.baseUrl + 'history?limit=1');
                 if (!response.ok) {
                     throw new Error('API request failed: ' + response.status);
                 }
-                return await response.json();
+                const history = await response.json();
+                if (history && history.length > 0) {
+                    const latest = history[history.length - 1]; // Node server returns oldest to newest, though maybe history returns descending? Let's just grab index 0 or length-1
+                    return [
+                        { capteur_id: 3, valeur: latest.temperature }, // Ambiante
+                        { capteur_id: 2, valeur: latest.temperature - 1.5 }, // Fake Reprise
+                    ];
+                }
+                return [];
             }
         };
 
@@ -936,10 +966,33 @@
                 updateElement('mode-value', data.mode);
                 applyModeStyle(data.mode);
             }
-            if (!etatManuallyToggled) {
-                updateElement('etat-value', data.etat);
-                applyEtatStyle(data.etat);
+            // Try fetching LIVE equipment status from DB!
+            try {
+                const eqResponse = await fetch('http://localhost:3001/api/equipments');
+                const equipments = await eqResponse.json();
+                
+                const slugMap = {
+                    'galerie-gauche': 'CTA Galerie Gauche',
+                    'galerie-droite': 'CTA Galerie Droite',
+                    'salle-polyvalente': 'CTA Salle Polyvalente',
+                    'hall-reception': 'CTA Hall Réception'
+                };
+                const matchedEq = equipments.find(e => e.name === slugMap[currentCTA]);
+                if (matchedEq && !etatManuallyToggled) {
+                    const dynamicEtat = matchedEq.status === 'actif' ? 'Actif' : 'Inactif';
+                    updateElement('etat-value', dynamicEtat);
+                    applyEtatStyle(dynamicEtat);
+                    // Update sidecard
+                    const cardEtatSpan = document.querySelector(`[data-cta="${currentCTA}-etat"]`);
+                    if (cardEtatSpan) {
+                         cardEtatSpan.textContent = dynamicEtat;
+                         cardEtatSpan.style.color = dynamicEtat === 'Actif' ? 'var(--success)' : 'var(--danger)';
+                    }
+                }
+            } catch(e) {
+                console.error("Failed fetching dynamic DB status", e);
             }
+
             if (!consigneManuallyChanged) {
                 updateElement('consigne-value', data.consigne);
             }

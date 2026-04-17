@@ -359,8 +359,31 @@ function doLogout() {
         const v = localStorage.getItem(key);
         if (v) el.textContent = v;
     });
+
+    // Mise à jour dynamique de TOUS les statuts depuis la base de données
+    fetch('http://localhost:3001/api/equipments')
+        .then(res => res.json())
+        .then(equipments => {
+            const slugMap = {
+                'CTA Galerie Gauche': 'galerie-gauche',
+                'CTA Galerie Droite': 'galerie-droite',
+                'CTA Salle Polyvalente': 'salle-polyvalente',
+                'CTA Hall Réception': 'hall-reception'
+            };
+            equipments.forEach(eq => {
+                const slug = slugMap[eq.name];
+                if (slug) {
+                    const etatSpan = document.querySelector(`[data-idx="${slug}-etat"]`);
+                    if (etatSpan) {
+                        etatSpan.textContent = eq.status === 'actif' ? 'Actif' : 'Inactif';
+                    }
+                }
+            });
+        })
+        .catch(e => console.error("Could not fetch equipments table on dashboard load", e));
 })();
 </script>
+<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
 <script src="script.js"></script>
 </body>
 </html>
